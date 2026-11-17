@@ -1,29 +1,30 @@
 package dev.songlines.bridge;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.service.notification.NotificationListenerService;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-/** Один экран: статус моста и кнопки для выдачи нужных разрешений. */
 public class MainActivity extends Activity {
     private TextView status;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable refresh = new Runnable() {
+    private final Runnable refresher = new Runnable() {
         @Override
         public void run() {
-            status.setText(buildStatus());
-            handler.postDelayed(this, 1000);
+            refresh();
+            handler.postDelayed(this, 1500);
         }
     };
 
@@ -31,81 +32,137 @@ public class MainActivity extends Activity {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
-    private TextView text(String s, int sp) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(sp);
-        t.setPadding(0, dp(6), 0, dp(6));
-        return t;
-    }
-
-    private Button button(String label, View.OnClickListener l) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setOnClickListener(l);
-        return b;
-    }
-
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(16), dp(24), dp(16), dp(24));
+
+        TextView title = new TextView(this);
+        title.setText("SongLines Bridge");
+        title.setTextSize(22);
+        col.addView(title);
+
+        status = new TextView(this);
+        status.setTextSize(15);
+        status.setPadding(0, dp(12), 0, dp(12));
+        col.addView(status);
+
+        addButton(col, "1. Доступ к уведомлениям", this::openListenerSettings);
+        addButton(col, "   Если пункт серый: сведения о приложении → ⋮ → «Разрешить ограниченные настройки»", this::openAppDetails);
+        addButton(col, "2. Разрешить показ уведомлений", this::askNotifications);
+        addButton(col, "3. Автозапуск (Xiaomi)", this::openAutostart);
+        addButton(col, "4. Батарея: «Без ограничений»", this::openBattery);
+        addButton(col, "Перезапустить службу моста", this::restartService);
+
+        TextView hint = new TextView(this);
+        hint.setText("\nЧтобы мост жил в фоне на Xiaomi/HyperOS: включи автозапуск, поставь батарею «Без ограничений», "
+                + "закрепи приложение в списке недавних (замок) и не смахивай постоянное уведомление.");
+        hint.setTextSize(13);
+        col.addView(hint);
+
         ScrollView sv = new ScrollView(this);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(40), dp(20), dp(20));
-        sv.addView(root);
-
-        root.addView(text("SongLines Bridge", 24));
-        root.addView(text("Передаёт моду Songlines, что сейчас играет на телефоне (Lane, Spotify, YouTube Music и др.).", 14));
-        status = text("", 15);
-        root.addView(status);
-
-        root.addView(button("1. Выдать доступ к уведомлениям", v ->
-                startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))));
-        root.addView(text("Если переключатель серый или пишет «ограничено»: нажми кнопку 2, затем ⋮ вверху справа → «Разрешить ограниченные настройки», потом снова кнопка 1.", 13));
-        root.addView(button("2. Открыть настройки приложения", v -> {
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            i.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(i);
-        }));
-        root.addView(button("3. Батарея: убрать ограничения", v ->
-                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))));
-        root.addView(text("Найди SongLines Bridge и выбери «Без ограничений», иначе система может выключать мост.", 13));
-        root.addView(button("Перезапустить мост", v -> {
-            try {
-                NotificationListenerService.requestRebind(new ComponentName(this, MediaBridgeService.class));
-            } catch (Exception ignored) {
-            }
-        }));
-        root.addView(text("В моде: меню (M) → Source → Bridge.", 13));
+        sv.addView(col);
         setContentView(sv);
+
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+        }
     }
 
-    private boolean listenerEnabled() {
-        String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
-        return flat != null && flat.contains(getPackageName());
-    }
-
-    private String buildStatus() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Доступ к уведомлениям: ").append(listenerEnabled() ? "есть ✓" : "нет ✗").append("\n");
-        sb.append("Сервер 127.0.0.1:").append(MediaBridgeService.PORT).append(": ")
-                .append(MediaBridgeService.serverUp ? "работает ✓" : "выключен ✗").append("\n");
-        String t = MediaBridgeService.lastTrack;
-        sb.append("Сейчас: ").append(t == null || t.isEmpty() ? "ничего не играет" : t);
-        return sb.toString();
+    private void addButton(LinearLayout col, String label, Runnable r) {
+        Button bt = new Button(this);
+        bt.setText(label);
+        bt.setAllCaps(false);
+        bt.setOnClickListener((View v) -> r.run());
+        col.addView(bt);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        handler.post(refresh);
+        startBridge();
+        handler.post(refresher);
     }
 
     @Override
     protected void onPause() {
-        handler.removeCallbacks(refresh);
+        handler.removeCallbacks(refresher);
         super.onPause();
+    }
+
+    private void startBridge() {
+        try {
+            startForegroundService(new Intent(this, BridgeService.class));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void restartService() {
+        stopService(new Intent(this, BridgeService.class));
+        handler.postDelayed(this::startBridge, 400);
+    }
+
+    private boolean listenerEnabled() {
+        String s = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+        return s != null && s.contains(getPackageName());
+    }
+
+    private boolean notificationsAllowed() {
+        return Build.VERSION.SDK_INT < 33
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void refresh() {
+        String t = BridgeServer.lastTrack;
+        status.setText("Доступ к уведомлениям: " + (listenerEnabled() ? "выдан ✓" : "НЕ выдан ✗")
+                + "\nПоказ уведомлений: " + (notificationsAllowed() ? "разрешён ✓" : "не разрешён ✗")
+                + "\nСервер 127.0.0.1:" + BridgeServer.PORT + ": " + (BridgeServer.serverUp ? "работает ✓" : "не запущен ✗")
+                + "\nСейчас: " + (t.isEmpty() ? "ничего не играет" : t));
+    }
+
+    private boolean tryStart(Intent i) {
+        try {
+            startActivity(i);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void openListenerSettings() {
+        if (!tryStart(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))) openAppDetails();
+    }
+
+    private void openAppDetails() {
+        tryStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
+    }
+
+    private void askNotifications() {
+        if (Build.VERSION.SDK_INT >= 33 && !notificationsAllowed()) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+        } else {
+            Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            if (!tryStart(i)) openAppDetails();
+        }
+    }
+
+    /** Экран автозапуска MIUI/HyperOS; на других телефонах и если не нашёлся — сведения о приложении. */
+    private void openAutostart() {
+        Intent i = new Intent().setComponent(new ComponentName("com.miui.securitycenter",
+                "com.miui.permcenter.autostart.AutoStartManagementActivity"));
+        if (!tryStart(i)) openAppDetails();
+    }
+
+    private void openBattery() {
+        Intent miui = new Intent().setComponent(new ComponentName("com.miui.powerkeeper",
+                        "com.miui.powerkeeper.ui.HiddenAppsConfigActivity"))
+                .putExtra("package_name", getPackageName())
+                .putExtra("package_label", "SongLines Bridge");
+        if (tryStart(miui)) return;
+        if (tryStart(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))) return;
+        openAppDetails();
     }
 }

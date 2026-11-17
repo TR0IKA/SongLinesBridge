@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="false"
@@ -17,6 +20,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Служба переднего плана: держит HTTP-сервер моста живым, показывает постоянное уведомление -->
+        <service
+            android:name=".BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="local_media_bridge" />
+        </service>
+
+        <!-- Слушатель уведомлений: даёт доступ к медиа-сессиям любого плеера -->
         <service
             android:name=".MediaBridgeService"
             android:exported="true"
